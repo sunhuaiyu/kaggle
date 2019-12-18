@@ -63,7 +63,7 @@ class human_protein_Dataset(Dataset):
                 'labels': labels }
         return sample
 
-# image preprocessing options
+# image preprocessing
 image_transform = transforms.Compose([
     #transforms.Resize(256),
     #transforms.CenterCrop(224),
@@ -75,7 +75,9 @@ image_transform = transforms.Compose([
 ])
 
 
-# metadata; one-hot encoding of labels, split train/test
+#==================================================================
+# read metadata; one-hot encoding of labels, split train/test if necessary
+#==================================================================
 df_meta_data = pd.read_csv('train.csv')
 
 y_label = [[int(i) for i in j.split()] for j in df_meta_data.Target]
@@ -121,25 +123,30 @@ model.conv1 = nn.Conv2d(
 model.fc = nn.Linear(in_features=2048, out_features=n_classes, bias=True)
 model.to(device)  
 
+#if restart
+#model = torch.load('./ResNet50_model_saved/resnet50_human_protein_cpu_11epochs.torch')
 
 #==================================================================
 #training
 #==================================================================
-# weight vector for BCEWithLogitsLoss():
+# class-weight vector for BCEWithLogitsLoss():
 label_counts = np.array(df_meta_data.iloc[:, 1:].sum(axis=0))
 weight = torch.tensor(len(df_meta_data)/label_counts - 1.0, dtype=torch.float).log()
 weight.to(device)
 
+# loss function
 loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=weight)
 loss_fn.to(device)
 
+# optimizer
 n_epochs = 30
-learning_rate = 0.0001
+learning_rate = 1e-4 #changed to 1e-5 after ~10 epochs
 optimizer = Adam(model.parameters(), lr=learning_rate)
 
+# training loop; save model after every epoch
 for i in range(n_epochs):
 
-    for batch in train_generator:
+    for bn, batch in enumerate(train_generator):
         X_train = batch['image'].to(device, non_blocking=True)
         y_label = batch['labels'].to(device, non_blocking=True)
         
@@ -149,17 +156,17 @@ for i in range(n_epochs):
         loss.backward()
         optimizer.step()
 
-    print(f'{datetime.datetime.now().strftime("%H:%M:%S")}\tepoch {i}\ttrain-loss {loss.item()}')
+        print(f'{datetime.datetime.now().strftime("%H:%M:%S")}\t' +\
+              f'epoch {i}:{bn}\t train-loss {loss.item():.8f}')
       
     torch.save(model, f'./ResNet50_model_saved/resnet50_human_protein_cpu_{i+1}epochs.torch')   
 
 
 #==================================================================
-#evaluate test data
+#evaluate test data for submission
 #==================================================================
 model = torch.load(
-    '/biodata/export_home/hsun/' +\
-    'kaggle/human-protein-atlas-image-classification/ResNet50_model_saved/' +\
+    './ResNet50_model_saved/' +\
     'resnet50_human_protein_cpu_6epochs.torch'
 )
 
@@ -189,7 +196,7 @@ with torch.no_grad():
 import pickle
 pickle.dump(all_preds, open('all_preds_dict.pickle', 'wb'))
 
-threshold = 0.3  
+threshold = 0.3  #need to bracket threshold based on submissions
 def threshold_fn(x): 
     labels = np.nonzero((all_preds[x] > threshold).astype(int))[0]
     return ' '.join(str(i) for i in labels)    
